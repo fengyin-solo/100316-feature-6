@@ -30,6 +30,27 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出通风系统清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "ventilation", "total": total, "items": items}
+
+
+@router.get("/affected-alarms")
+def affected_alarms() -> dict[str, Any]:
+    """瓦斯超限受影响清单：报警明细实时取自瓦斯测点记录，两边同源。"""
+    items = service.affected_alarms()
+    return {"module": "ventilation", "total": len(items), "items": items}
+
+
+@router.get("/roadways")
+def roadways() -> dict[str, Any]:
+    """通风台账在册巷道：瓦斯测点登记时用它对齐所在区域。"""
+    names = service.roadway_names()
+    return {"total": len(names), "items": names}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条通风设备明细；不存在时给出可读的错误说明。"""
@@ -56,10 +77,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出通风系统清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "ventilation", "total": total, "items": items}

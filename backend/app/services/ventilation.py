@@ -13,6 +13,78 @@ NEGATIVE_ACTIONS = []
 
 
 class VentilationService:
+    def roadway_names(self) -> list[str]:
+        """从通风台账归集巷道名称，供瓦斯测点登记时对齐所在区域。"""
+        names: list[str] = []
+        for row in store.rows(MODULE):
+            name = str(row.get("所属巷道") or "").strip()
+            if name and name not in names:
+                names.append(name)
+        return names
+
+    def record_gas_alarm(
+        self, gas_entry: dict[str, Any], *, at: str
+    ) -> list[dict[str, Any]]:
+        """把超限报警结论回写到同巷道通风设备台账的受影响清单。
+
+        受影响清单只保存瓦斯测点引用与回写时刻的结论快照；
+        清单明细从瓦斯记录实时读取，两处报警始终同源。
+        同一条瓦斯记录重复回写（重复超限报警提交）只登记一次。
+        """
+        gas_id = int(gas_entry.get("id", 0))
+        area = str(gas_entry.get("所在区域") or "").strip()
+        matched = [
+            row for row in store.rows(MODULE)
+            if str(row.get("所属巷道") or "").strip() == area
+        ]
+        snapshot = {
+            "gas_id": gas_id,
+            "测点编号": gas_entry.get("测点编号"),
+            "报警时刻": at,
+            "瓦斯浓度": gas_entry.get("瓦斯浓度"),
+            "结论": "超限报警",
+        }
+        for row in matched:
+            ledger = row.setdefault("受影响清单", [])
+            if not any(int(item.get("gas_id", 0)) == gas_id for item in ledger):
+                ledger.append(snapshot)
+        return matched
+
+    def affected_alarms(self) -> list[dict[str, Any]]:
+        """汇总通风台账受影响清单：报警内容实时取自瓦斯记录，保证两边同源。"""
+        result: list[dict[str, Any]] = []
+        for row in store.rows(MODULE):
+            for ref in row.get("受影响清单", []) or []:
+                gas_id = int(ref.get("gas_id", 0))
+                gas_entry = store.find("gas", gas_id)
+                item = {
+                    "设备编号": row.get("设备编号"),
+                    "所属巷道": row.get("所属巷道"),
+                    "回写时刻": ref.get("报警时刻"),
+                    "回写结论": ref.get("结论"),
+                }
+                if gas_entry is not None:
+                    item.update({
+                        "gas_id": gas_id,
+                        "测点编号": gas_entry.get("测点编号"),
+                        "所在区域": gas_entry.get("所在区域"),
+                        "瓦斯浓度": gas_entry.get("瓦斯浓度"),
+                        "测点当前状态": gas_entry.get("status"),
+                        "监测时刻": gas_entry.get("监测时刻"),
+                    })
+                else:
+                    # 瓦斯记录被归档时退回快照，避免台账清单出现死链
+                    item.update({
+                        "gas_id": gas_id,
+                        "测点编号": ref.get("测点编号"),
+                        "所在区域": row.get("所属巷道"),
+                        "瓦斯浓度": ref.get("瓦斯浓度"),
+                        "测点当前状态": "记录已归档",
+                        "监测时刻": None,
+                    })
+                result.append(item)
+        return result
+
     def list_entries(
         self,
         *,
