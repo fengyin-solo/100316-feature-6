@@ -30,6 +30,20 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/alarms")
+def list_alarms() -> dict[str, Any]:
+    """超限报警台账：与通风台账的受影响清单同源，新的报警排在前面。"""
+    items = service.list_alarms()
+    return {"module": "gas", "total": len(items), "items": items}
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出瓦斯监测清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "gas", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条瓦斯测点明细；不存在时给出可读的错误说明。"""
@@ -41,25 +55,21 @@ def get_entry(entry_id: int) -> dict:
 
 @router.post("", response_model=ActionResult)
 def create_entry(payload: EntryPayload) -> ActionResult:
-    """登记一条瓦斯测点，缺字段时说明原因而不是静默丢弃。"""
-    entry, missing = service.create_entry(payload.values)
-    if missing:
-        return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
+    """登记一条瓦斯测点，缺字段或区域对不上通风巷道时说明原因而不是静默丢弃。"""
+    entry, problems = service.create_entry(payload.values)
+    if problems:
+        return ActionResult(ok=False, message="；".join(problems))
     return ActionResult(ok=True, message="瓦斯测点已登记", entry=entry)
 
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条瓦斯测点执行偏高预警、超限报警、处置确认；不允许的动作会被拦下并说明原因。"""
+    """对单条瓦斯测点执行偏高预警、超限报警、处置确认；跳级、已处置的动作会被拦下并说明原因。"""
     action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    conclusion = payload.values.get("结论")
+    entry, message = service.run_action(
+        entry_id, action, conclusion=str(conclusion) if conclusion is not None else None
+    )
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出瓦斯监测清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "gas", "total": total, "items": items}

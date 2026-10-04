@@ -36,7 +36,7 @@
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td v-for="column in columns" :key="column">{{ formatCell(row[column]) }}</td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -67,10 +67,10 @@ import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | string[] | null>
 
 const ENDPOINT = '/api/ventilation'
-const columns = ["设备编号", "设备类型", "额定风量", "运行频率", "电流值", "所属巷道", "上次检修", "设备状态"]
+const columns = ["设备编号", "设备类型", "额定风量", "运行频率", "电流值", "所属巷道", "上次检修", "设备状态", "受影响清单"]
 const actions = ["降频运行", "故障停机", "办理更换"]
 const statuses = ["正常", "降频运行", "故障停机", "已更换"]
 const stats = [{"label": "正常设备", "value": 0}, {"label": "降频设备", "value": 0}, {"label": "故障设备", "value": 0}]
@@ -80,6 +80,11 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+function formatCell(value: string | number | string[] | null | undefined): string {
+  if (Array.isArray(value)) return value.length ? value.join('；') : '—'
+  return value == null || value === '' ? '—' : String(value)
+}
 
 function resetFilters() {
   filters.value = {}
@@ -99,10 +104,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('通风系统动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.message ?? payload?.detail ?? '通风系统动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {

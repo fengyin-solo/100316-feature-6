@@ -14,6 +14,8 @@ class Store:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
+        # 超限报警台账：瓦斯侧写入、通风侧读取，两边同源，不算独立业务模块
+        self._alarms: list[dict[str, Any]] = []
 
     def module_names(self) -> list[str]:
         return sorted(self._tables)
@@ -26,6 +28,22 @@ class Store:
             if int(row.get("id", 0)) == entry_id:
                 return row
         return None
+
+    def append_alarm(self, record: dict[str, Any]) -> dict[str, Any]:
+        """写入一条超限报警，返回带 id 的台账记录。"""
+        alarm = dict(record)
+        alarm["id"] = len(self._alarms) + 1
+        self._alarms.append(alarm)
+        return dict(alarm)
+
+    def alarms(self, *, area: str | None = None, point: str | None = None) -> list[dict[str, Any]]:
+        """按区域或测点编号读取报警台账；不传条件时返回全部，新的在前。"""
+        records = self._alarms
+        if area is not None:
+            records = [a for a in records if a.get("所在区域") == area]
+        if point is not None:
+            records = [a for a in records if a.get("测点编号") == point]
+        return [dict(a) for a in reversed(records)]
 
     def overview(self) -> dict[str, object]:
         modules: list[dict[str, object]] = []
